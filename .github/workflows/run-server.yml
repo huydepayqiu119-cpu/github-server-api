@@ -48,7 +48,11 @@ jobs:
 
       - name: Start ngrok and update ip.txt
         run: |
-          ngrok config add-authtoken ${{ secrets.NGROK_TOKEN }}
+          if [ -z "$NGROK_TOKEN" ]; then
+            echo "NGROK_TOKEN secret is not set"
+            exit 1
+          fi
+          ngrok config add-authtoken "$NGROK_TOKEN"
           ngrok http 25565 --log=stdout > /tmp/ngrok.log 2>&1 &
 
           for i in $(seq 1 30); do
@@ -72,5 +76,6 @@ jobs:
             -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
           echo "ip.txt updated: $NGROK_URL"
-
           wait
+        env:
+          NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
