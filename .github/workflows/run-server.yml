@@ -3,7 +3,6 @@ name: Run Server API
 on:
   workflow_dispatch:
   schedule:
-    # Chạy lại mỗi 5 giờ (GitHub Actions max 6h per job)
     - cron: '0 */5 * * *'
 
 jobs:
@@ -12,23 +11,19 @@ jobs:
     timeout-minutes: 300
 
     steps:
-      - name: Checkout server-api repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: huydepayqiu119-cpu/server-api
           token: ${{ secrets.APISERVER }}
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install dependencies
-        run: npm install
+      - run: npm install
 
-      - name: Install cloudflared
-        run: |
+      - run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
@@ -38,64 +33,41 @@ jobs:
           PORT: 25565
           GITHUB_TOKEN: ${{ secrets.APISERVER }}
           GITHUB_OWNER: huydepayqiu119-cpu
-          GITHUB_REPO: tool-bot
+          GITHUB_REPO: github-server-api
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
 
-      - name: Wait for server to be ready
+      - name: Wait for server
         run: |
           for i in $(seq 1 15); do
-            if curl -s http://localhost:25565/health > /dev/null 2>&1; then
-              echo "Server is ready"
-              break
-            fi
-            echo "Waiting... ($i)"
-            sleep 2
+            curl -s http://localhost:25565/health > /dev/null 2>&1 && echo "Ready" && break
+            echo "Waiting... ($i)" && sleep 2
           done
 
-      - name: Start cloudflared tunnel and update ip.txt
+      - name: Tunnel and update ip.txt
         run: |
-          # Chạy tunnel, lấy URL public
           cloudflared tunnel --url http://localhost:25565 --no-autoupdate 2>&1 | tee /tmp/cf.log &
           CF_PID=$!
 
-          # Chờ URL xuất hiện trong log
           for i in $(seq 1 30); do
             CF_URL=$(grep -o 'https://[a-z0-9\-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
-            if [ -n "$CF_URL" ]; then
-              echo "Tunnel URL: $CF_URL"
-              break
-            fi
+            [ -n "$CF_URL" ] && echo "Tunnel URL: $CF_URL" && break
             sleep 2
           done
 
-          if [ -z "$CF_URL" ]; then
-            echo "Failed to get tunnel URL"
-            exit 1
-          fi
+          [ -z "$CF_URL" ] && echo "Failed to get tunnel URL" && exit 1
 
-          echo "Updating ip.txt via GitHub API..."
-
-          # Lấy SHA của file ip.txt hiện tại
           FILE_SHA=$(curl -s \
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
             | jq -r '.sha')
 
-          echo "Current SHA: $FILE_SHA"
-
-          # Encode nội dung mới sang base64
-          NEW_CONTENT=$(echo -n "$CF_URL" | base64 -w 0)
-
-          # Update file qua API
           curl -s -X PUT \
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
-            -d "{\"message\":\"update url: $CF_URL\",\"content\":\"$NEW_CONTENT\",\"sha\":\"$FILE_SHA\"}"
+            -d "{\"message\":\"update url: $CF_URL\",\"content\":\"$(echo -n "$CF_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
           echo "ip.txt updated: $CF_URL"
-
-          # Giữ tunnel sống
           wait $CF_PID
