@@ -23,42 +23,27 @@ jobs:
 
       - run: npm install
 
-      - name: Install ngrok
-        run: |
+      - run: |
           curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
           echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
           sudo apt-get update -qq && sudo apt-get install -y ngrok
 
-      - name: Start server
-        run: node index.js &
-        env:
-          PORT: 25565
-          GITHUB_TOKEN: ${{ secrets.APISERVER }}
-          GITHUB_OWNER: huydepayqiu119-cpu
-          GITHUB_REPO: tool-bot
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
-          LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
-
-      - name: Wait for server
+      - name: Start server, ngrok and stream logs
         run: |
+          node index.js > /tmp/server.log 2>&1 &
+
           for i in $(seq 1 15); do
-            curl -s http://localhost:25565/health > /dev/null 2>&1 && echo "Ready" && break
-            echo "Waiting... ($i)" && sleep 2
+            curl -s http://localhost:25565/health > /dev/null 2>&1 && break
+            sleep 2
           done
 
-      - name: Start ngrok and update ip.txt
-        run: |
-          if [ -z "$NGROK_TOKEN" ]; then
-            echo "NGROK_TOKEN secret is not set"
-            exit 1
-          fi
           ngrok config add-authtoken "$NGROK_TOKEN"
-          ngrok http 25565 --log=stdout > /tmp/ngrok.log 2>&1 &
+          ngrok http 25565 > /tmp/ngrok.log 2>&1 &
 
           for i in $(seq 1 30); do
             NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' 2>/dev/null)
-            [ -n "$NGROK_URL" ] && [ "$NGROK_URL" != "null" ] && echo "Tunnel URL: $NGROK_URL" && break
-            echo "Waiting for ngrok... ($i)" && sleep 2
+            [ -n "$NGROK_URL" ] && [ "$NGROK_URL" != "null" ] && break
+            sleep 2
           done
 
           [ -z "$NGROK_URL" ] || [ "$NGROK_URL" = "null" ] && echo "Failed to get ngrok URL" && exit 1
@@ -75,7 +60,13 @@ jobs:
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
             -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
-          echo "ip.txt updated: $NGROK_URL"
-          wait
+          echo "Tunnel URL: $NGROK_URL"
+          tail -f /tmp/server.log
         env:
+          PORT: 25565
+          GITHUB_TOKEN: ${{ secrets.APISERVER }}
+          GITHUB_OWNER: huydepayqiu119-cpu
+          GITHUB_REPO: github-server-api
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
