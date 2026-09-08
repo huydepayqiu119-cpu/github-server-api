@@ -23,9 +23,11 @@ jobs:
 
       - run: npm install
 
-      - run: |
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
+      - name: Install ngrok
+        run: |
+          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt-get update -qq && sudo apt-get install -y ngrok
 
       - name: Start server
         run: node index.js &
@@ -33,7 +35,7 @@ jobs:
           PORT: 25565
           GITHUB_TOKEN: ${{ secrets.APISERVER }}
           GITHUB_OWNER: huydepayqiu119-cpu
-          GITHUB_REPO: github-server-api
+          GITHUB_REPO: tool-bot
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
 
@@ -44,18 +46,18 @@ jobs:
             echo "Waiting... ($i)" && sleep 2
           done
 
-      - name: Tunnel and update ip.txt
+      - name: Start ngrok and update ip.txt
         run: |
-          cloudflared tunnel --url http://localhost:25565 --no-autoupdate --http2-origin=false --no-tls-verify --proxy-keepalive-timeout 600s --proxy-connection-timeout 600s 2>&1 | tee /tmp/cf.log &
-          CF_PID=$!
+          ngrok config add-authtoken ${{ secrets.NGROK_TOKEN }}
+          ngrok http 25565 --log=stdout > /tmp/ngrok.log 2>&1 &
 
           for i in $(seq 1 30); do
-            CF_URL=$(grep -o 'https://[a-z0-9\-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
-            [ -n "$CF_URL" ] && echo "Tunnel URL: $CF_URL" && break
-            sleep 2
+            NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url' 2>/dev/null)
+            [ -n "$NGROK_URL" ] && [ "$NGROK_URL" != "null" ] && echo "Tunnel URL: $NGROK_URL" && break
+            echo "Waiting for ngrok... ($i)" && sleep 2
           done
 
-          [ -z "$CF_URL" ] && echo "Failed to get tunnel URL" && exit 1
+          [ -z "$NGROK_URL" ] || [ "$NGROK_URL" = "null" ] && echo "Failed to get ngrok URL" && exit 1
 
           FILE_SHA=$(curl -s \
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
@@ -67,7 +69,8 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
-            -d "{\"message\":\"update url: $CF_URL\",\"content\":\"$(echo -n "$CF_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
+            -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
-          echo "ip.txt updated: $CF_URL"
-          wait $CF_PID
+          echo "ip.txt updated: $NGROK_URL"
+
+          wait
