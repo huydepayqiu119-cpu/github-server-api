@@ -46,7 +46,7 @@ jobs:
 
       - name: Tunnel and update ip.txt
         run: |
-          cloudflared tunnel --url http://localhost:25565 --no-autoupdate --http2-origin=false --no-tls-verify 2>&1 | tee /tmp/cf.log &
+          cloudflared tunnel --url http://localhost:25565 --no-autoupdate --http2-origin=false --no-tls-verify --proxy-keepalive-timeout 600s --proxy-connection-timeout 600s 2>&1 | tee /tmp/cf.log &
           CF_PID=$!
 
           for i in $(seq 1 30); do
