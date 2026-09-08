@@ -27,24 +27,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Get public IP and update ip.txt
+      - name: Install cloudflared
         run: |
-          PUBLIC_IP=$(curl -s https://api.ipify.org)
-          echo "$PUBLIC_IP" > ip.txt
-          echo "Server IP: $PUBLIC_IP"
-
-      - name: Commit and push ip.txt to server-api
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git add ip.txt
-          git diff --staged --quiet || git commit -m "update ip: $(cat ip.txt)"
-          git push origin HEAD:main
-        env:
-          GITHUB_TOKEN: ${{ secrets.APISERVER }}
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
 
       - name: Start server
-        run: node index.js
+        run: node index.js &
         env:
           PORT: 25565
           GITHUB_TOKEN: ${{ secrets.APISERVER }}
@@ -52,3 +41,56 @@ jobs:
           GITHUB_REPO: tool-bot
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
+
+      - name: Wait for server to be ready
+        run: |
+          for i in $(seq 1 15); do
+            if curl -s http://localhost:25565/health > /dev/null 2>&1; then
+              echo "Server is ready"
+              break
+            fi
+            echo "Waiting... ($i)"
+            sleep 2
+          done
+
+      - name: Start cloudflared tunnel and update ip.txt
+        run: |
+          # Chạy tunnel, lấy URL public
+          cloudflared tunnel --url http://localhost:25565 --no-autoupdate 2>&1 | tee /tmp/cf.log &
+          CF_PID=$!
+
+          # Chờ URL xuất hiện trong log
+          for i in $(seq 1 30); do
+            CF_URL=$(grep -o 'https://[a-z0-9\-]*\.trycloudflare\.com' /tmp/cf.log | head -1)
+            if [ -n "$CF_URL" ]; then
+              echo "Tunnel URL: $CF_URL"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$CF_URL" ]; then
+            echo "Failed to get tunnel URL"
+            exit 1
+          fi
+
+          # Ghi URL vào ip.txt
+          echo "$CF_URL" > ip.txt
+          cat ip.txt
+
+          # Commit và push ip.txt vào repo github-server-api
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+          cd $GITHUB_WORKSPACE
+          git remote set-url origin https://x-access-token:${{ secrets.APISERVER }}@github.com/huydepayqiu119-cpu/github-server-api.git
+          git fetch origin main || git fetch origin master
+          git checkout main 2>/dev/null || git checkout master 2>/dev/null || git checkout -b main
+
+          echo "$CF_URL" > ip.txt
+          git add ip.txt
+          git diff --staged --quiet || git commit -m "update url: $CF_URL"
+          git push origin HEAD:main
+
+          # Giữ tunnel sống
+          wait $CF_PID
