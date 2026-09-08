@@ -1,0 +1,54 @@
+name: Run Server API
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Chạy lại mỗi 5 giờ (GitHub Actions max 6h per job)
+    - cron: '0 */5 * * *'
+
+jobs:
+  run-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout server-api repository
+        uses: actions/checkout@v4
+        with:
+          repository: huydepayqiu119-cpu/server-api
+          token: ${{ secrets.APISERVER }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Get public IP and update ip.txt
+        run: |
+          PUBLIC_IP=$(curl -s https://api.ipify.org)
+          echo "$PUBLIC_IP" > ip.txt
+          echo "Server IP: $PUBLIC_IP"
+
+      - name: Commit and push ip.txt to server-api
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add ip.txt
+          git diff --staged --quiet || git commit -m "update ip: $(cat ip.txt)"
+          git push origin HEAD:main
+        env:
+          GITHUB_TOKEN: ${{ secrets.APISERVER }}
+
+      - name: Start server
+        run: node index.js
+        env:
+          PORT: 25565
+          GITHUB_TOKEN: ${{ secrets.APISERVER }}
+          GITHUB_OWNER: huydepayqiu119-cpu
+          GITHUB_REPO: tool-bot
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
