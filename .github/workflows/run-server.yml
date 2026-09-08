@@ -74,23 +74,28 @@ jobs:
             exit 1
           fi
 
-          # Ghi URL vào ip.txt
-          echo "$CF_URL" > ip.txt
-          cat ip.txt
+          echo "Updating ip.txt via GitHub API..."
 
-          # Commit và push ip.txt vào repo github-server-api
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
+          # Lấy SHA của file ip.txt hiện tại
+          FILE_SHA=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
+            | jq -r '.sha')
 
-          cd $GITHUB_WORKSPACE
-          git remote set-url origin https://x-access-token:${{ secrets.APISERVER }}@github.com/huydepayqiu119-cpu/github-server-api.git
-          git fetch origin main || git fetch origin master
-          git checkout main 2>/dev/null || git checkout master 2>/dev/null || git checkout -b main
+          echo "Current SHA: $FILE_SHA"
 
-          echo "$CF_URL" > ip.txt
-          git add ip.txt
-          git diff --staged --quiet || git commit -m "update url: $CF_URL"
-          git push origin HEAD:main
+          # Encode nội dung mới sang base64
+          NEW_CONTENT=$(echo -n "$CF_URL" | base64 -w 0)
+
+          # Update file qua API
+          curl -s -X PUT \
+            -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
+            -d "{\"message\":\"update url: $CF_URL\",\"content\":\"$NEW_CONTENT\",\"sha\":\"$FILE_SHA\"}"
+
+          echo "ip.txt updated: $CF_URL"
 
           # Giữ tunnel sống
           wait $CF_PID
