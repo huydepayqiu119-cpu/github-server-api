@@ -34,12 +34,21 @@ jobs:
 
       - name: Start server, ngrok and stream logs
         run: |
-          node index.js > /tmp/server.log 2>&1 &
+          tg() { curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="HTML" -d text="$1" > /dev/null; }
 
-          for i in $(seq 1 15); do
-            curl -s http://localhost:25565/health > /dev/null 2>&1 && break
-            sleep 2
-          done
+          tg "🚀 <b>Server API starting...</b>&#10;⏰ $(date '+%Y-%m-%d %H:%M:%S UTC')"
+
+          node index.js > /tmp/server.log 2>&1 &
+          SERVER_PID=$!
+
+          for i in $(seq 1 15); do curl -s http://localhost:25565/health > /dev/null 2>&1 && break; sleep 2; done
+
+          if curl -s http://localhost:25565/health > /dev/null 2>&1; then
+            tg "✅ <b>Server started</b> (PID: $SERVER_PID)"
+          else
+            tg "❌ <b>Server failed!</b>&#10;<code>$(tail -20 /tmp/server.log)</code>"
+            exit 1
+          fi
 
           ngrok config add-authtoken "$NGROK_TOKEN"
           ngrok http 25565 > /tmp/ngrok.log 2>&1 &
@@ -50,7 +59,10 @@ jobs:
             sleep 2
           done
 
-          [ -z "$NGROK_URL" ] || [ "$NGROK_URL" = "null" ] && echo "Failed to get ngrok URL" && exit 1
+          if [ -z "$NGROK_URL" ] || [ "$NGROK_URL" = "null" ]; then
+            tg "❌ <b>Ngrok failed!</b>&#10;<code>$(tail -10 /tmp/ngrok.log)</code>"
+            exit 1
+          fi
 
           FILE_SHA=$(curl -s \
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
@@ -64,8 +76,23 @@ jobs:
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
             -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
+          tg "🌐 <b>Tunnel active!</b>&#10;URL: <code>$NGROK_URL</code>&#10;⏰ $(date '+%Y-%m-%d %H:%M:%S UTC')"
+
           echo "Tunnel URL: $NGROK_URL"
-          tail -f /tmp/server.log
+
+          LAST_PING=$(date +%s)
+          tail -f /tmp/server.log | while IFS= read -r line; do
+            echo "$line"
+            if echo "$line" | grep -qiE "(error|exception|crash|fatal|uncaught|unhandled)"; then
+              curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="HTML" -d text="⚠️ <b>Error</b>&#10;<code>$(echo "$line" | head -c 500)</code>" > /dev/null
+            fi
+            NOW=$(date +%s)
+            if [ $((NOW - LAST_PING)) -ge 1800 ]; then
+              UPTIME=$(ps -p $SERVER_PID -o etime= 2>/dev/null || echo "unknown")
+              curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="HTML" -d text="💓 <b>Still running</b>&#10;Uptime: $UPTIME&#10;URL: <code>$NGROK_URL</code>" > /dev/null
+              LAST_PING=$NOW
+            fi
+          done
         env:
           PORT: 25565
           GITHUB_TOKEN: ${{ secrets.APISERVER }}
@@ -74,3 +101,5 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           LOBFILE_API_KEYS: ${{ secrets.LOBFILE_API_KEYS }}
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
