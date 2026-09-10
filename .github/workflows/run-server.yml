@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
 
-          ngrok config add-authtoken "$NGROK_TOKEN"
+          ngrok config add-authtoken "$NGROK_TOKEN" > /dev/null 2>&1
           ngrok http 25565 > /tmp/ngrok.log 2>&1 &
 
           for i in $(seq 1 30); do
@@ -70,13 +70,13 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.APISERVER }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/huydepayqiu119-cpu/github-server-api/contents/ip.txt \
-            -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
+            -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}" > /dev/null
 
           EARLY_LOG=$(cat /tmp/server.log | head -c 3000)
           MSG="🌐 <b>$NGROK_URL</b>&#10;⏰ $(date '+%Y-%m-%d %H:%M:%S UTC')&#10;&#10;<code>$EARLY_LOG</code>"
           curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{\"chat_id\":\"$TELEGRAM_CHAT_ID\",\"parse_mode\":\"HTML\",\"text\":$(echo "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
+            -d "{\"chat_id\":\"$TELEGRAM_CHAT_ID\",\"parse_mode\":\"HTML\",\"text\":$(echo "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" > /dev/null
 
           echo "Tunnel URL: $NGROK_URL"
 
