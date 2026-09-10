@@ -94,9 +94,10 @@ jobs:
 
             CURRENT_LINE=$(wc -l < /tmp/server.log)
             if [ "$CURRENT_LINE" -gt "$LAST_LINE" ]; then
-              NEW_LINES=$(sed -n "$((LAST_LINE + 1)),${CURRENT_LINE}p" /tmp/server.log | head -c 3500)
+              NEW_LINES=$(sed -n "$((LAST_LINE + 1)),${CURRENT_LINE}p" /tmp/server.log)
+              echo "$NEW_LINES"
               LAST_LINE=$CURRENT_LINE
-              tg_json "<code>$NEW_LINES</code>"
+              tg_json "<code>$(echo "$NEW_LINES" | head -c 3500)</code>"
             fi
 
             NOW=$(date +%s)
