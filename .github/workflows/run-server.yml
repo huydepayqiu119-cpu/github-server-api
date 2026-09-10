@@ -80,18 +80,33 @@ jobs:
 
           echo "Tunnel URL: $NGROK_URL"
 
+          tg_json() {
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "{\"chat_id\":\"$TELEGRAM_CHAT_ID\",\"parse_mode\":\"HTML\",\"text\":$(echo "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}" > /dev/null
+          }
+
+          LAST_LINE=$(wc -l < /tmp/server.log)
           LAST_PING=$(date +%s)
-          tail -n +1 -f /tmp/server.log | while IFS= read -r line; do
-            echo "$line"
-            if echo "$line" | grep -qiE "(error|exception|crash|fatal|uncaught|unhandled)"; then
-              curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="HTML" -d text="⚠️ <b>Error</b>&#10;<code>$(echo "$line" | head -c 500)</code>" > /dev/null
+
+          while true; do
+            sleep 10
+
+            CURRENT_LINE=$(wc -l < /tmp/server.log)
+            if [ "$CURRENT_LINE" -gt "$LAST_LINE" ]; then
+              NEW_LINES=$(sed -n "$((LAST_LINE + 1)),${CURRENT_LINE}p" /tmp/server.log | head -c 3500)
+              LAST_LINE=$CURRENT_LINE
+              tg_json "<code>$NEW_LINES</code>"
             fi
+
             NOW=$(date +%s)
             if [ $((NOW - LAST_PING)) -ge 1800 ]; then
               UPTIME=$(ps -p $SERVER_PID -o etime= 2>/dev/null || echo "unknown")
-              curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="$TELEGRAM_CHAT_ID" -d parse_mode="HTML" -d text="💓 <b>Still running</b>&#10;Uptime: $UPTIME&#10;URL: <code>$NGROK_URL</code>" > /dev/null
+              tg_json "💓 <b>Still running</b>&#10;Uptime: $UPTIME&#10;URL: <code>$NGROK_URL</code>"
               LAST_PING=$NOW
             fi
+
+            kill -0 $SERVER_PID 2>/dev/null || { tg_json "💀 <b>Server process died!</b>"; exit 1; }
           done
         env:
           PORT: 25565
