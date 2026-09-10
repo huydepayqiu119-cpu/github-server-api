@@ -73,7 +73,10 @@ jobs:
             -d "{\"message\":\"update url: $NGROK_URL\",\"content\":\"$(echo -n "$NGROK_URL" | base64 -w 0)\",\"sha\":\"$FILE_SHA\"}"
 
           EARLY_LOG=$(cat /tmp/server.log | head -c 3000)
-          tg "🌐 <b>$NGROK_URL</b>&#10;⏰ $(date '+%Y-%m-%d %H:%M:%S UTC')&#10;&#10;<code>$EARLY_LOG</code>"
+          MSG="🌐 <b>$NGROK_URL</b>&#10;⏰ $(date '+%Y-%m-%d %H:%M:%S UTC')&#10;&#10;<code>$EARLY_LOG</code>"
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"$TELEGRAM_CHAT_ID\",\"parse_mode\":\"HTML\",\"text\":$(echo "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
 
           echo "Tunnel URL: $NGROK_URL"
 
